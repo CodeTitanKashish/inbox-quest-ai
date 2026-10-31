@@ -96,10 +96,13 @@ app.get('*', (req, res, next) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`🏰 Inbox Quest AI server running on port ${PORT}`);
-  console.log(`⚔️  Mode: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`🛡️  Protection Engine Active: Royal Relics & Critical Mail Safeguarded.`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🏰 Inbox Quest AI server running on port ${PORT}`);
+    console.log(`⚔️  Mode: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🛡️  Protection Engine Active: Royal Relics & Critical Mail Safeguarded.`);
+  });
+}
+
 
 export default app;
