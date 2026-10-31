@@ -6,30 +6,75 @@ import { RELIC_ICONS } from '../../../shared/constants';
 
 export const emailRouter = Router();
 
+// In-memory sync status tracking per session
+interface SyncStatus {
+  isSyncing: boolean;
+  loadedCount: number;
+  totalCount: number;
+  percent: number;
+}
+const sessionSyncStatus = new Map<string, SyncStatus>();
+
 // List emails with AI classification and protection status
+// Loads first ~100 emails right away for instant gameplay, streams the rest in the background
 emailRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 40;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
     const pageToken = req.query.pageToken as string | undefined;
     const search = req.query.search as string | undefined;
+    const sessionId = req.userSession.sessionId;
 
     const listResult = await req.emailProvider.listEmails({ limit, pageToken, search });
 
-    // Classify batch with Gemini AI (or fallback to rules)
+    // Classify immediate batch (uses Rules-First + LRU cache + Gemini fallback)
     const classifications = await GeminiClassifier.classifyBatch(listResult.emails);
 
-    const enrichedEmails = listResult.emails.map(email => {
-      const classification = classifications.get(email.id);
-      return {
-        ...email,
-        classification
-      };
+    const enrichedEmails = listResult.emails.map(email => ({
+      ...email,
+      classification: classifications.get(email.id)
+    }));
+
+    // Initialize or update sync status
+    const currentLoaded = enrichedEmails.length;
+    const total = listResult.totalCount || currentLoaded;
+    const isComplete = currentLoaded >= total;
+
+    sessionSyncStatus.set(sessionId, {
+      isSyncing: !isComplete,
+      loadedCount: currentLoaded,
+      totalCount: total,
+      percent: Math.min(100, Math.round((currentLoaded / total) * 100))
     });
+
+    // Trigger non-blocking background hydration for any remaining emails if not fully loaded
+    if (!isComplete && !pageToken && !search) {
+      setImmediate(async () => {
+        try {
+          const remainingResult = await req.emailProvider.listEmails({ limit: total - currentLoaded, pageToken: String(currentLoaded) });
+          await GeminiClassifier.classifyBatch(remainingResult.emails);
+          sessionSyncStatus.set(sessionId, {
+            isSyncing: false,
+            loadedCount: total,
+            totalCount: total,
+            percent: 100
+          });
+        } catch (bgErr) {
+          console.warn('Background email hydration completed with partial results:', bgErr);
+          sessionSyncStatus.set(sessionId, {
+            isSyncing: false,
+            loadedCount: currentLoaded,
+            totalCount: total,
+            percent: 100
+          });
+        }
+      });
+    }
 
     res.json({
       emails: enrichedEmails,
       nextPageToken: listResult.nextPageToken,
-      totalCount: listResult.totalCount
+      totalCount: listResult.totalCount,
+      syncStatus: sessionSyncStatus.get(sessionId)
     });
   } catch (err: any) {
     console.error('Error in /api/emails:', err);
@@ -40,10 +85,20 @@ emailRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// Background Sync Status endpoint for UI progress indicator
+emailRouter.get('/sync-status', (req: Request, res: Response) => {
+  const status = sessionSyncStatus.get(req.userSession.sessionId) || {
+    isSyncing: false,
+    loadedCount: 100,
+    totalCount: 100,
+    percent: 100
+  };
+  res.json(status);
+});
+
 // Dashboard statistics and dynamic AI insight line
 emailRouter.get('/dashboard', async (req: Request, res: Response) => {
   try {
-    // Inspect up to 200 emails for comprehensive kingdom overview
     const listResult = await req.emailProvider.listEmails({ limit: 200 });
     const classifications = await GeminiClassifier.classifyBatch(listResult.emails);
 

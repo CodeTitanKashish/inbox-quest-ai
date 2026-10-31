@@ -1,8 +1,13 @@
 import { EmailClassification, EmailItem } from '../../../../shared/types';
 import { ProtectionEngine } from '../protection/protectionEngine';
 
+export interface ClassificationResultWithConfidence {
+  classification: EmailClassification;
+  isCertain: boolean;
+}
+
 export class RuleClassifier {
-  public static classify(email: EmailItem): EmailClassification {
+  public static classifyWithConfidence(email: EmailItem): ClassificationResultWithConfidence {
     const text = `${email.subject} ${email.snippet} ${email.sender}`.toLowerCase();
     const sender = (email.senderEmail || email.sender || '').toLowerCase();
 
@@ -16,14 +21,17 @@ export class RuleClassifier {
       text.includes('wire transfer confidential')
     ) {
       return {
-        category: 'Spam',
-        importanceScore: 5,
-        urgencyScore: 10,
-        summary: `Suspicious spam solicitation from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'archive',
-        reason: 'Contains classic spam keywords, high risk of financial phishing or fraudulent sweepstakes.',
-        isProtected: false,
-        protectionReasons: []
+        classification: {
+          category: 'Spam',
+          importanceScore: 5,
+          urgencyScore: 10,
+          summary: `Suspicious spam solicitation from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'archive',
+          reason: 'Contains classic spam keywords, high risk of financial phishing or fraudulent sweepstakes.',
+          isProtected: false,
+          protectionReasons: []
+        },
+        isCertain: true
       };
     }
 
@@ -34,14 +42,17 @@ export class RuleClassifier {
       text.includes('black friday') || text.includes('deal:')
     ) {
       return {
-        category: 'Promotion',
-        importanceScore: 15,
-        urgencyScore: 20,
-        summary: `Marketing discount announcement from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'archive',
-        reason: 'Time-sensitive commercial promotion or retailer discount code.',
-        isProtected: false,
-        protectionReasons: []
+        classification: {
+          category: 'Promotion',
+          importanceScore: 15,
+          urgencyScore: 20,
+          summary: `Marketing discount announcement from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'archive',
+          reason: 'Time-sensitive commercial promotion or retailer discount code.',
+          isProtected: false,
+          protectionReasons: []
+        },
+        isCertain: true
       };
     }
 
@@ -52,14 +63,17 @@ export class RuleClassifier {
       sender.includes('substack') || sender.includes('medium')
     ) {
       return {
-        category: 'Newsletter',
-        importanceScore: 25,
-        urgencyScore: 10,
-        summary: `Periodic reading digest or tech newsletter from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'archive',
-        reason: 'Informational recurring newsletter suitable for weekend reading or archiving.',
-        isProtected: false,
-        protectionReasons: []
+        classification: {
+          category: 'Newsletter',
+          importanceScore: 25,
+          urgencyScore: 10,
+          summary: `Periodic reading digest or tech newsletter from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'archive',
+          reason: 'Informational recurring newsletter suitable for weekend reading or archiving.',
+          isProtected: false,
+          protectionReasons: []
+        },
+        isCertain: true
       };
     }
 
@@ -70,14 +84,17 @@ export class RuleClassifier {
       text.includes('viewed your profile') || text.includes('notifications')
     ) {
       return {
-        category: 'Social',
-        importanceScore: 20,
-        urgencyScore: 15,
-        summary: `Automated social network activity notification from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'archive',
-        reason: 'Social media ping or community discussion update.',
-        isProtected: false,
-        protectionReasons: []
+        classification: {
+          category: 'Social',
+          importanceScore: 20,
+          urgencyScore: 15,
+          summary: `Automated social network activity notification from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'archive',
+          reason: 'Social media ping or community discussion update.',
+          isProtected: false,
+          protectionReasons: []
+        },
+        isCertain: true
       };
     }
 
@@ -88,14 +105,17 @@ export class RuleClassifier {
     ) {
       const prot = ProtectionEngine.evaluate(email, 'Education', 85);
       return {
-        category: 'Education',
-        importanceScore: 90,
-        urgencyScore: 80,
-        summary: `Official academic record or institutional dispatch from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'keep',
-        reason: 'Critical university notice containing academic evaluations, deadlines, or credentials.',
-        isProtected: true,
-        protectionReasons: prot.reasons
+        classification: {
+          category: 'Education',
+          importanceScore: 90,
+          urgencyScore: 80,
+          summary: `Official academic record or institutional dispatch from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'keep',
+          reason: 'Critical university notice containing academic evaluations, deadlines, or credentials.',
+          isProtected: true,
+          protectionReasons: prot.reasons
+        },
+        isCertain: true
       };
     }
 
@@ -106,14 +126,17 @@ export class RuleClassifier {
     ) {
       const prot = ProtectionEngine.evaluate(email, 'Work', 95);
       return {
-        category: 'Work',
-        importanceScore: 95,
-        urgencyScore: 90,
-        summary: `Important employment or career opportunity from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'keep',
-        reason: 'High-stakes career correspondence regarding job offer, interview round, or placement drive.',
-        isProtected: true,
-        protectionReasons: prot.reasons
+        classification: {
+          category: 'Work',
+          importanceScore: 95,
+          urgencyScore: 90,
+          summary: `Important employment or career opportunity from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'keep',
+          reason: 'High-stakes career correspondence regarding job offer, interview round, or placement drive.',
+          isProtected: true,
+          protectionReasons: prot.reasons
+        },
+        isCertain: true
       };
     }
 
@@ -124,42 +147,55 @@ export class RuleClassifier {
     ) {
       const prot = ProtectionEngine.evaluate(email, 'Finance', 95);
       return {
-        category: 'Finance',
-        importanceScore: 95,
-        urgencyScore: 85,
-        summary: `Confidential banking, payroll, or tax record from ${email.sender.split('<')[0].trim()}.`,
-        recommendedAction: 'keep',
-        reason: 'Official financial audit record, fraudulent activity alert, or income documentation.',
-        isProtected: true,
-        protectionReasons: prot.reasons
+        classification: {
+          category: 'Finance',
+          importanceScore: 95,
+          urgencyScore: 85,
+          summary: `Confidential banking, payroll, or tax record from ${email.sender.split('<')[0].trim()}.`,
+          recommendedAction: 'keep',
+          reason: 'Official financial audit record, fraudulent activity alert, or income documentation.',
+          isProtected: true,
+          protectionReasons: prot.reasons
+        },
+        isCertain: true
       };
     }
 
     if (text.includes('verification code') || text.includes('one-time password') || text.includes('otp')) {
       const prot = ProtectionEngine.evaluate(email, 'Critical', 98);
       return {
-        category: 'Critical',
-        importanceScore: 98,
-        urgencyScore: 98,
-        summary: `Security verification OTP code for identity authentication.`,
-        recommendedAction: 'keep',
-        reason: 'Temporary cryptographic credential required to access accounts.',
-        isProtected: true,
-        protectionReasons: prot.reasons
+        classification: {
+          category: 'Critical',
+          importanceScore: 98,
+          urgencyScore: 98,
+          summary: `Security verification OTP code for identity authentication.`,
+          recommendedAction: 'keep',
+          reason: 'Temporary cryptographic credential required to access accounts.',
+          isProtected: true,
+          protectionReasons: prot.reasons
+        },
+        isCertain: true
       };
     }
 
-    // Default evaluation
+    // Default evaluation for ambiguous/personal emails
     const isProt = initialProt.isProtected;
     return {
-      category: isProt ? 'Important' : 'Personal',
-      importanceScore: isProt ? 80 : 40,
-      urgencyScore: isProt ? 70 : 30,
-      summary: `${email.subject.slice(0, 100)} from ${email.sender.split('<')[0].trim()}.`,
-      recommendedAction: isProt ? 'keep' : 'review',
-      reason: isProt ? 'Contains protected operational keywords.' : 'General correspondence.',
-      isProtected: isProt,
-      protectionReasons: initialProt.reasons
+      classification: {
+        category: isProt ? 'Important' : 'Personal',
+        importanceScore: isProt ? 80 : 40,
+        urgencyScore: isProt ? 70 : 30,
+        summary: `${email.subject.slice(0, 100)} from ${email.sender.split('<')[0].trim()}.`,
+        recommendedAction: isProt ? 'keep' : 'review',
+        reason: isProt ? 'Contains protected operational keywords.' : 'General correspondence.',
+        isProtected: isProt,
+        protectionReasons: initialProt.reasons
+      },
+      isCertain: isProt // If definitely protected by keywords, certain; otherwise uncertain, candidate for Gemini
     };
+  }
+
+  public static classify(email: EmailItem): EmailClassification {
+    return this.classifyWithConfidence(email).classification;
   }
 }

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Sparkles, Volume2, VolumeX, Moon, RotateCcw, LogIn, LogOut } from 'lucide-react';
+import { Shield, Sparkles, Volume2, VolumeX, Moon, RotateCcw, LogIn, LogOut, Trophy } from 'lucide-react';
 import { sound } from '../../audio/synth';
 import { useAnnounce } from './AriaAnnouncer';
 
@@ -14,6 +14,7 @@ interface NavbarProps {
   onLogoutClick: () => void;
   onToggleCalm: () => void;
   onOpenUndo: () => void;
+  onOpenRewards: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -26,7 +27,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onDemoClick,
   onLogoutClick,
   onToggleCalm,
-  onOpenUndo
+  onOpenUndo,
+  onOpenRewards
 }) => {
   const [muted, setMuted] = React.useState(sound.getMuted());
   const { announce } = useAnnounce();
@@ -142,7 +144,53 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </button>
 
-        {/* Auth / Demo Mode Switch */}
+        {/* Rewards & Armory Drawer */}
+        <button
+          onClick={onOpenRewards}
+          className="btn-secondary"
+          title="Kingdom Armory, Badges & Daily Loot Chests"
+          aria-label="Open Kingdom Rewards"
+          style={{ padding: '8px 14px', position: 'relative', borderColor: 'rgba(245, 158, 11, 0.4)' }}
+        >
+          <Trophy size={16} color="#fbbf24" />
+          <span>Rewards</span>
+          <span style={{
+            background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+            color: '#0f172a',
+            borderRadius: '12px',
+            padding: '1px 6px',
+            fontSize: '0.65rem',
+            fontWeight: 800,
+            marginLeft: '4px'
+          }}>
+            NEW
+          </span>
+        </button>
+
+        {/* Try Demo Button - Always visible and accessible */}
+        <button
+          onClick={onDemoClick}
+          className="btn-secondary"
+          id="try-demo-btn"
+          title="Load 200 realistic sample emails into Demo Mode"
+          aria-label="Try Demo Mode with 200 sample emails"
+          style={{
+            padding: '8px 16px',
+            fontSize: '0.85rem',
+            background: isDemo ? 'rgba(56, 189, 248, 0.18)' : 'rgba(245, 158, 11, 0.18)',
+            borderColor: isDemo ? 'rgba(56, 189, 248, 0.5)' : 'rgba(245, 158, 11, 0.5)',
+            color: isDemo ? '#38bdf8' : '#fbbf24',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            cursor: 'pointer'
+          }}
+        >
+          <Sparkles size={16} color={isDemo ? '#38bdf8' : '#fbbf24'} />
+          <span style={{ fontWeight: 700 }}>Try Demo</span>
+        </button>
+
+        {/* Auth / Login Controls */}
         {isAuthenticated ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>{email}</span>
@@ -156,26 +204,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {!isDemo && (
-              <button
-                onClick={onDemoClick}
-                className="btn-secondary"
-                style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-              >
-                <Sparkles size={16} color="#38bdf8" />
-                <span>Try Demo</span>
-              </button>
-            )}
-            <button
-              onClick={onLoginClick}
-              className="btn-primary"
-              style={{ padding: '8px 16px', fontSize: '0.85rem' }}
-            >
-              <LogIn size={16} />
-              <span>Login with Google</span>
-            </button>
-          </div>
+          <button
+            onClick={onLoginClick}
+            className="btn-primary"
+            style={{ padding: '8px 16px', fontSize: '0.85rem' }}
+          >
+            <LogIn size={16} />
+            <span>Login with Google</span>
+          </button>
         )}
       </div>
     </header>
