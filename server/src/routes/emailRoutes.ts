@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { GeminiClassifier } from '../services/ai/geminiClassifier';
 import { ProtectionEngine } from '../services/protection/protectionEngine';
+import { RealtimeHub } from '../services/realtime/realtimeHub';
 import { DashboardStats, RelicItem } from '../../../shared/types';
 import { RELIC_ICONS } from '../../../shared/constants';
 
@@ -177,3 +178,81 @@ emailRouter.get('/relics', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch relics', message: err.message });
   }
 });
+
+// Real-time Server-Sent Events (SSE) stream for live Gmail inbox changes
+emailRouter.get('/live-stream', async (req: Request, res: Response) => {
+  try {
+    await RealtimeHub.getInstance().registerClient(req.userSession.sessionId, res, req.emailProvider);
+  } catch (err: any) {
+    console.error('Failed to register real-time client:', err);
+    res.status(500).end();
+  }
+});
+
+// Trigger immediate real-time sync with Gmail
+emailRouter.post('/sync', async (req: Request, res: Response) => {
+  try {
+    const listResult = await req.emailProvider.listEmails({ limit: 40 });
+    const classifications = await GeminiClassifier.classifyBatch(listResult.emails);
+    const enrichedEmails = listResult.emails.map(email => ({
+      ...email,
+      classification: classifications.get(email.id)
+    }));
+
+    // Broadcast sync event to all open sessions
+    RealtimeHub.getInstance().broadcastToSession(req.userSession.sessionId, {
+      type: 'sync',
+      timestamp: new Date().toISOString(),
+      data: {
+        totalCount: listResult.totalCount,
+        emailsCount: enrichedEmails.length
+      }
+    });
+
+    res.json({
+      success: true,
+      syncedAt: new Date().toISOString(),
+      totalCount: listResult.totalCount,
+      emails: enrichedEmails
+    });
+  } catch (err: any) {
+    console.error('Error during manual sync:', err);
+    res.status(500).json({ error: 'Sync failed', message: err.message });
+  }
+});
+
+// Google Cloud Pub/Sub Webhook for instant push notifications of Gmail changes
+emailRouter.post('/webhook', (req: Request, res: Response) => {
+  try {
+    const pubsubMessage = req.body?.message;
+    if (pubsubMessage && pubsubMessage.data) {
+      const decodedString = Buffer.from(pubsubMessage.data, 'base64').toString('utf-8');
+      try {
+        const payload = JSON.parse(decodedString);
+        console.log('📬 Google Pub/Sub Gmail push received:', payload);
+        RealtimeHub.getInstance().broadcastToAll({
+          type: 'inbox_changed',
+          timestamp: new Date().toISOString(),
+          data: payload
+        });
+      } catch {
+        RealtimeHub.getInstance().broadcastToAll({
+          type: 'inbox_changed',
+          timestamp: new Date().toISOString()
+        });
+      }
+    } else {
+      RealtimeHub.getInstance().broadcastToAll({
+        type: 'inbox_changed',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // Acknowledge Pub/Sub message immediately with HTTP 200
+    res.status(200).send('OK');
+  } catch (err: any) {
+    console.warn('Pub/Sub webhook processing warning:', err);
+    res.status(200).send('OK'); // Always return 200 to Pub/Sub to prevent retries
+  }
+});
+

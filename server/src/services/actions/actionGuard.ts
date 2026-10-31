@@ -78,9 +78,13 @@ export class ActionGuard {
       labels: [...e.labels]
     }));
 
-    // 3. Execute allowed actions: Apply Label & Archive
-    await provider.applyLabel(validIds, labelName);
-    await provider.archiveEmails(validIds);
+    // 3. Execute allowed actions: Apply Label & Archive in real-time (atomic if supported)
+    if (typeof provider.archiveAndLabelEmails === 'function') {
+      await provider.archiveAndLabelEmails(validIds, labelName);
+    } else {
+      await provider.applyLabel(validIds, labelName);
+      await provider.archiveEmails(validIds);
+    }
 
     // 4. Record Undo Log Entry
     const undoToken = `undo_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;

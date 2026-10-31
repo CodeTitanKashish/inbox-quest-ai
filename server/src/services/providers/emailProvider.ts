@@ -13,4 +13,12 @@ export interface IEmailProvider {
   applyLabel(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }>;
   removeLabel(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }>;
   unarchiveEmails(ids: string[]): Promise<{ success: boolean; modifiedIds: string[] }>;
+
+  // Real-time atomic modifications
+  archiveAndLabelEmails?(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }>;
+  unarchiveAndRemoveLabelEmails?(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }>;
+
+  // Real-time synchronization & history tracking
+  getHistoryId?(): Promise<string | undefined>;
+  checkChanges?(startHistoryId: string): Promise<{ hasChanges: boolean; newHistoryId?: string }>;
 }

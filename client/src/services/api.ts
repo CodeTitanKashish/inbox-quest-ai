@@ -124,4 +124,14 @@ export class ApiService {
       method: 'POST'
     });
   }
+
+  public static async triggerSync(): Promise<{ success: boolean; syncedAt: string; totalCount: number; emails: EmailItem[] }> {
+    return this.request('/api/emails/sync', {
+      method: 'POST'
+    });
+  }
+
+  public static createEventSource(): EventSource {
+    return new EventSource('/api/emails/live-stream', { withCredentials: true });
+  }
 }

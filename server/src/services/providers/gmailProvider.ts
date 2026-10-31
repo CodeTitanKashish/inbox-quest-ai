@@ -243,4 +243,93 @@ export class GmailProvider implements IEmailProvider {
 
     return { success: true, modifiedIds: ids };
   }
+
+  /**
+   * Atomically labels and archives emails in a single batchModify call for real-time responsiveness.
+   */
+  public async archiveAndLabelEmails(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }> {
+    if (ids.length === 0) return { success: true, modifiedIds: [] };
+    const labelId = await this.getOrCreateLabelId(labelName);
+
+    await this.retryWithBackoff(() =>
+      this.gmail.users.messages.batchModify({
+        userId: 'me',
+        requestBody: {
+          ids,
+          addLabelIds: [labelId],
+          removeLabelIds: ['INBOX']
+        }
+      })
+    );
+
+    return { success: true, modifiedIds: ids };
+  }
+
+  /**
+   * Atomically unarchives and removes custom label in a single batchModify call.
+   */
+  public async unarchiveAndRemoveLabelEmails(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }> {
+    if (ids.length === 0) return { success: true, modifiedIds: [] };
+    const labelId = await this.getOrCreateLabelId(labelName);
+
+    await this.retryWithBackoff(() =>
+      this.gmail.users.messages.batchModify({
+        userId: 'me',
+        requestBody: {
+          ids,
+          addLabelIds: ['INBOX'],
+          removeLabelIds: [labelId]
+        }
+      })
+    );
+
+    return { success: true, modifiedIds: ids };
+  }
+
+  /**
+   * Returns current user historyId for real-time synchronization.
+   */
+  public async getHistoryId(): Promise<string | undefined> {
+    try {
+      const profile = await this.retryWithBackoff(() =>
+        this.gmail.users.getProfile({ userId: 'me' })
+      );
+      return profile.data.historyId || undefined;
+    } catch (e: any) {
+      console.warn('Failed to get Gmail historyId:', e?.message || e);
+      return undefined;
+    }
+  }
+
+  /**
+   * Checks if changes occurred in Gmail since startHistoryId using Gmail History API.
+   */
+  public async checkChanges(startHistoryId: string): Promise<{ hasChanges: boolean; newHistoryId?: string }> {
+    if (!startHistoryId) {
+      const latest = await this.getHistoryId();
+      return { hasChanges: false, newHistoryId: latest };
+    }
+
+    try {
+      const res = await this.retryWithBackoff(() =>
+        this.gmail.users.history.list({
+          userId: 'me',
+          startHistoryId,
+          historyTypes: ['messageAdded', 'labelAdded', 'labelRemoved']
+        })
+      );
+      const history = res.data.history || [];
+      return {
+        hasChanges: history.length > 0,
+        newHistoryId: res.data.historyId || undefined
+      };
+    } catch (err: any) {
+      if (err.status === 404 || err.code === 404) {
+        // historyId is outdated or expired, trigger full reload
+        const latest = await this.getHistoryId();
+        return { hasChanges: true, newHistoryId: latest };
+      }
+      return { hasChanges: false, newHistoryId: startHistoryId };
+    }
+  }
 }

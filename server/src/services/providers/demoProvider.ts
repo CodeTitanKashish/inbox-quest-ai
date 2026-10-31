@@ -4,6 +4,7 @@ import { EmailListResult, IEmailProvider } from './emailProvider';
 
 export class DemoProvider implements IEmailProvider {
   private emails: EmailItem[];
+  private revision: number = 1;
 
   constructor() {
     // Deep copy sample emails so changes don't mutate template
@@ -53,6 +54,7 @@ export class DemoProvider implements IEmailProvider {
       }
     }
 
+    if (modified.length > 0) this.revision++;
     return { success: true, modifiedIds: modified };
   }
 
@@ -69,6 +71,7 @@ export class DemoProvider implements IEmailProvider {
       }
     }
 
+    if (modified.length > 0) this.revision++;
     return { success: true, modifiedIds: modified };
   }
 
@@ -83,6 +86,7 @@ export class DemoProvider implements IEmailProvider {
       }
     }
 
+    if (modified.length > 0) this.revision++;
     return { success: true, modifiedIds: modified };
   }
 
@@ -100,10 +104,39 @@ export class DemoProvider implements IEmailProvider {
       }
     }
 
+    if (modified.length > 0) this.revision++;
     return { success: true, modifiedIds: modified };
+  }
+
+  public async archiveAndLabelEmails(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }> {
+    await this.applyLabel(ids, labelName);
+    const res = await this.archiveEmails(ids);
+    this.revision++;
+    return res;
+  }
+
+  public async unarchiveAndRemoveLabelEmails(ids: string[], labelName: string): Promise<{ success: boolean; modifiedIds: string[] }> {
+    await this.removeLabel(ids, labelName);
+    const res = await this.unarchiveEmails(ids);
+    this.revision++;
+    return res;
+  }
+
+  public async getHistoryId(): Promise<string | undefined> {
+    return String(this.revision);
+  }
+
+  public async checkChanges(startHistoryId: string): Promise<{ hasChanges: boolean; newHistoryId?: string }> {
+    const hasChanges = String(this.revision) !== startHistoryId;
+    return { hasChanges, newHistoryId: String(this.revision) };
+  }
+
+  public bumpVersion(): void {
+    this.revision++;
   }
 
   public reset(): void {
     this.emails = JSON.parse(JSON.stringify(ALL_DEMO_EMAILS));
+    this.revision++;
   }
 }

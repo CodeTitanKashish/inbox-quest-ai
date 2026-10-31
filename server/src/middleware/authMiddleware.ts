@@ -50,6 +50,10 @@ export function sessionMiddleware(req: Request, res: Response, next: NextFunctio
       process.env.GOOGLE_REDIRECT_URI
     );
     oauth2Client.setCredentials(session.tokens);
+    oauth2Client.on('tokens', (newTokens) => {
+      session.tokens = { ...session.tokens, ...newTokens };
+      UserStore.updateTokens(sessionId, session.email || '', session.tokens);
+    });
     req.emailProvider = new GmailProvider(oauth2Client);
   } else {
     req.emailProvider = getOrCreateDemoProvider(sessionId);

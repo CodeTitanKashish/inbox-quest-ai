@@ -1,5 +1,5 @@
 import React from 'react';
-import { Shield, Sparkles, Volume2, VolumeX, Moon, RotateCcw, LogIn, LogOut, Trophy } from 'lucide-react';
+import { Shield, Sparkles, Volume2, VolumeX, Moon, RotateCcw, LogIn, LogOut, Trophy, RefreshCw } from 'lucide-react';
 import { sound } from '../../audio/synth';
 import { useAnnounce } from './AriaAnnouncer';
 
@@ -9,6 +9,9 @@ interface NavbarProps {
   email?: string;
   calmMode: boolean;
   undoCount: number;
+  isRealtimeActive?: boolean;
+  isSyncing?: boolean;
+  onTriggerSync?: () => void;
   onLoginClick: () => void;
   onDemoClick: () => void;
   onLogoutClick: () => void;
@@ -23,6 +26,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   email,
   calmMode,
   undoCount,
+  isRealtimeActive = true,
+  isSyncing = false,
+  onTriggerSync,
   onLoginClick,
   onDemoClick,
   onLogoutClick,
@@ -91,6 +97,39 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       {/* Action Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {/* Real-time Gmail Sync Status & Trigger */}
+        <button
+          onClick={onTriggerSync}
+          disabled={isSyncing}
+          className="btn-secondary"
+          title={isRealtimeActive ? "Real-time Gmail changes active. Click to sync immediately." : "Connecting to real-time Gmail changes. Click to sync."}
+          aria-label={isSyncing ? "Syncing Gmail inbox..." : "Sync Gmail Inbox in Real-Time"}
+          style={{
+            padding: '8px 14px',
+            fontSize: '0.85rem',
+            background: isRealtimeActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(56, 189, 248, 0.1)',
+            borderColor: isRealtimeActive ? 'rgba(16, 185, 129, 0.4)' : 'rgba(56, 189, 248, 0.3)',
+            color: isRealtimeActive ? '#34d399' : '#38bdf8',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <span
+            className={isRealtimeActive ? 'pulse-live-dot' : ''}
+            style={{
+              display: 'inline-block',
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: isRealtimeActive ? '#10b981' : '#f59e0b',
+              boxShadow: isRealtimeActive ? '0 0 8px #10b981' : 'none'
+            }}
+          />
+          <RefreshCw size={14} className={isSyncing ? 'spin' : ''} />
+          <span>{isSyncing ? 'Syncing...' : 'Real-Time Sync'}</span>
+        </button>
+
         {/* Calm Mode Toggle (Accessibility) */}
         <button
           onClick={onToggleCalm}

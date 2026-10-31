@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { ActionGuard, ActionGuardError } from '../services/actions/actionGuard';
 import { UserStore } from '../services/storage/userStore';
+import { RealtimeHub } from '../services/realtime/realtimeHub';
 import { ENEMIES } from '../../../shared/constants';
 import { EnemyType } from '../../../shared/types';
 
@@ -53,6 +54,14 @@ actionRouter.post('/batch', async (req: Request, res: Response) => {
 
     const updatedSession = UserStore.getOrCreateSession(req.userSession.sessionId);
 
+    // Notify connected real-time streams of the inbox change
+    RealtimeHub.getInstance().notifyActionExecuted(req.userSession.sessionId, {
+      actionType: 'archive_and_label',
+      modifiedCount: result.modifiedCount,
+      labelName,
+      undoToken: result.undoToken
+    });
+
     res.json({
       success: true,
       modifiedCount: result.modifiedCount,
@@ -95,6 +104,13 @@ actionRouter.post('/undo', async (req: Request, res: Response) => {
     });
 
     const updatedSession = UserStore.getOrCreateSession(req.userSession.sessionId);
+
+    // Notify connected real-time streams of the inbox change
+    RealtimeHub.getInstance().notifyActionExecuted(req.userSession.sessionId, {
+      actionType: 'undo',
+      modifiedCount: result.restoredCount,
+      undoToken
+    });
 
     res.json({
       success: true,
