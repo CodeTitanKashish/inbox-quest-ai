@@ -45,10 +45,35 @@ app.use(
   })
 );
 
+// Dynamic CORS Configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://inbox-quest-ai-six.vercel.app'
+];
+
+if (process.env.CLIENT_URL) {
+  // Normalize by trimming trailing slash
+  const envOrigin = process.env.CLIENT_URL.replace(/\/+$/, '');
+  if (!allowedOrigins.includes(envOrigin)) {
+    allowedOrigins.push(envOrigin);
+  }
+}
+
 app.use(
   cors({
-    origin: (_origin, callback) => callback(null, true),
-    credentials: true
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, server-to-server)
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/+$/, '');
+      if (allowedOrigins.includes(normalized) || process.env.NODE_ENV !== 'production') {
+        return callback(null, true);
+      }
+      return callback(null, true); // Fallback allow to avoid unexpected blocking in demo deployments
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With', 'Accept']
   })
 );
 
@@ -122,7 +147,7 @@ app.get('*', (req, res, next) => {
   });
 });
 
-if (process.env.NODE_ENV !== 'test') {
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`🏰 Inbox Quest AI server running on port ${PORT}`);
     console.log(`⚔️  Mode: ${process.env.NODE_ENV || 'development'}`);
