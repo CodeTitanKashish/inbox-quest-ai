@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { ShieldCheck, Search, Sparkles, Filter, Lock, Tag, Zap, Check } from 'lucide-react';
-import { EmailItem, EnemyType } from '@shared/types';
+import { ShieldCheck, Search, Sparkles, Filter, Lock, Tag } from 'lucide-react';
+import { EmailItem } from '@shared/types';
 import { sound } from '../../audio/synth';
 import { useAnnounce } from '../common/AriaAnnouncer';
 
@@ -9,7 +9,6 @@ interface EmailInspectorProps {
   activeFilter: string;
   onFilterChange: (filter: string) => void;
   onSearchChange: (search: string) => void;
-  onExecuteSingleAction?: (emailId: string, labelName: string, enemyType?: EnemyType) => Promise<any>;
   nextPageToken?: string;
   onNextPage: () => void;
   onPrevPage: () => void;
@@ -20,14 +19,12 @@ export const EmailInspector: React.FC<EmailInspectorProps> = ({
   activeFilter,
   onFilterChange,
   onSearchChange,
-  onExecuteSingleAction,
   nextPageToken,
   onNextPage,
   onPrevPage
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmail, setSelectedEmail] = useState<EmailItem | null>(null);
-  const [isExecutingSingle, setIsExecutingSingle] = useState(false);
   const { announce } = useAnnounce();
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -39,33 +36,6 @@ export const EmailInspector: React.FC<EmailInspectorProps> = ({
     sound.playRelicChime();
     announce(`Royal Ward Protected: ${email.subject}. This email cannot be archived or removed.`);
     setSelectedEmail(email);
-  };
-
-  const getEnemyAndLabel = (category?: string): { labelName: string; enemyType: EnemyType } => {
-    switch (category) {
-      case 'Spam': return { labelName: 'InboxQuest/Spam', enemyType: 'SPAM_GOBLIN' };
-      case 'Promotion': return { labelName: 'InboxQuest/Promotions', enemyType: 'PROMOTION_ORC' };
-      case 'Newsletter': return { labelName: 'InboxQuest/Newsletters', enemyType: 'NEWSLETTER_SKELETON' };
-      case 'Social': return { labelName: 'InboxQuest/Social', enemyType: 'NOTIFICATION_ZOMBIE' };
-      default: return { labelName: 'InboxQuest/Archive', enemyType: 'DUPLICATE_SLIME' };
-    }
-  };
-
-  const handleExecuteRealtimeAction = async (email: EmailItem) => {
-    if (!onExecuteSingleAction || email.classification?.isProtected) return;
-    const { labelName, enemyType } = getEnemyAndLabel(email.classification?.category);
-    setIsExecutingSingle(true);
-    try {
-      sound.playSlash();
-      await onExecuteSingleAction(email.id, labelName, enemyType);
-      sound.playHit();
-      announce(`Real-time change applied to Gmail: Email archived and labeled under ${labelName}.`);
-      setSelectedEmail(null);
-    } catch (err: any) {
-      alert(`Could not execute action: ${err.message}`);
-    } finally {
-      setIsExecutingSingle(false);
-    }
   };
 
   // Filter emails based on tab selection

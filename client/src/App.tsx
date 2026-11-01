@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Navbar } from './components/common/Navbar';
+import { SignInPage } from './components/auth/SignInPage';
 import { KingdomMeter } from './components/dashboard/KingdomMeter';
 import { StatCards } from './components/dashboard/StatCards';
 import { BattleArena } from './components/game/BattleArena';
@@ -17,6 +18,16 @@ const AppContent: React.FC = () => {
   // App & Auth State
   const [auth, setAuth] = useState<AuthStatusResponse>({ isAuthenticated: false, isDemo: true });
   const [gameState, setGameState] = useState<GameState>(createInitialGameState());
+
+  // Sign-in page state — shown to brand-new visitors who haven't chosen a mode
+  const [showSignIn, setShowSignIn] = useState<boolean>(false);
+  const [signInLoading, setSignInLoading] = useState<boolean>(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
+  // Real-time sync state
+  const [isRealtimeActive, setIsRealtimeActive] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+
   const [stats, setStats] = useState<DashboardStats>({
     totalEmails: 0,
     unreadCount: 0,
@@ -56,6 +67,24 @@ const AppContent: React.FC = () => {
       setEmails(emailsRes.emails);
       setNextPageToken(emailsRes.nextPageToken);
       setUndoLogs(undoRes.logs);
+
+      // Show sign-in page if user is brand-new — no real auth AND inbox is empty (not in demo)
+      const hasMadeChoice = document.cookie.includes('inbox_quest_authenticated') ||
+        document.cookie.includes('inbox_quest_demo');
+      if (!hasMadeChoice && !authRes.isAuthenticated) {
+        setShowSignIn(true);
+      } else {
+        setShowSignIn(false);
+      }
+
+      // Parse OAuth error from URL (after redirect back from Google)
+      const urlParams = new URLSearchParams(window.location.search);
+      const errorParam = urlParams.get('error');
+      if (errorParam) {
+        setOauthError(decodeURIComponent(errorParam));
+        setShowSignIn(true);
+        window.history.replaceState({}, '', window.location.pathname);
+      }
     } catch (err: any) {
       console.error('Failed to load initial data:', err);
     } finally {
@@ -70,18 +99,25 @@ const AppContent: React.FC = () => {
   // Handle Google OAuth Login
   const handleLoginClick = async () => {
     try {
+      setSignInLoading(true);
+      setOauthError(null);
       const { url } = await ApiService.getGoogleAuthUrl();
       window.location.href = url;
     } catch (err: any) {
-      alert(`Google OAuth login unavailable: ${err.message}. You can test the complete app in Demo Mode!`);
+      setSignInLoading(false);
+      const msg = err.message || 'OAuth unavailable';
+      setOauthError(`Google Sign-In unavailable: ${msg}. You can try Demo Mode below.`);
     }
   };
 
   // Handle Demo Mode activation
   const handleDemoClick = async () => {
     try {
+      setSignInLoading(true);
       setLoading(true);
       await ApiService.activateDemoMode();
+      setShowSignIn(false);
+      setOauthError(null);
       announce('Demo Mode activated with 200 realistic emails loaded.');
       await loadData();
       setDemoBanner('✨ 200 sample emails loaded into Demo Mode. Explore the Battle Arena and Royal Relics below!');
@@ -90,14 +126,18 @@ const AppContent: React.FC = () => {
       alert(`Failed to activate demo mode: ${err.message}`);
     } finally {
       setLoading(false);
+      setSignInLoading(false);
     }
   };
 
-  // Handle Logout
+  // Handle Logout — show sign-in page again
   const handleLogoutClick = async () => {
     await ApiService.logout();
+    setShowSignIn(true);
+    setOauthError(null);
+    setIsRealtimeActive(false);
     await loadData();
-    announce('Logged out. Switched back to Demo Mode.');
+    announce('Logged out successfully.');
   };
 
   // Handle Calm Mode toggle
@@ -106,6 +146,73 @@ const AppContent: React.FC = () => {
     setGameState(res.gameState);
     announce(res.calmMode ? 'Calm Mode enabled.' : 'Calm Mode disabled.');
   };
+
+  // Handle manual real-time sync trigger
+  const handleTriggerSync = async () => {
+    if (isSyncing) return;
+    try {
+      setIsSyncing(true);
+      const syncRes = await ApiService.triggerSync();
+      setEmails(syncRes.emails);
+      const [statsRes, undoRes] = await Promise.all([
+        ApiService.getDashboardStats(),
+        ApiService.getUndoLogs()
+      ]);
+      setStats(statsRes);
+      setUndoLogs(undoRes.logs);
+      announce(`Inbox synced. ${syncRes.totalCount} emails updated.`);
+    } catch (err: any) {
+      console.warn('Sync failed:', err.message);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Set up SSE real-time connection
+  useEffect(() => {
+    if (showSignIn) return;
+    let es: EventSource | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const connect = () => {
+      es = ApiService.createEventSource();
+
+      es.addEventListener('connected', () => {
+        setIsRealtimeActive(true);
+      });
+
+      es.addEventListener('inbox_changed', () => {
+        // Silently refresh emails list when Gmail signals a change
+        ApiService.getEmails({ limit: 40, search: searchQuery }).then(res => {
+          setEmails(res.emails);
+          setNextPageToken(res.nextPageToken);
+        }).catch(() => {});
+      });
+
+      es.addEventListener('action_executed', () => {
+        // Refresh after any action (from another tab/session)
+        ApiService.getEmails({ limit: 40, search: searchQuery }).then(res => {
+          setEmails(res.emails);
+        }).catch(() => {});
+        ApiService.getUndoLogs().then(res => setUndoLogs(res.logs)).catch(() => {});
+      });
+
+      es.onerror = () => {
+        setIsRealtimeActive(false);
+        es?.close();
+        // Reconnect after 5 s
+        retryTimeout = setTimeout(connect, 5000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      es?.close();
+      if (retryTimeout) clearTimeout(retryTimeout);
+      setIsRealtimeActive(false);
+    };
+  }, [showSignIn, searchQuery]);
 
   // Handle Batch RPG action from BattleArena
   const handleExecuteBatchAction = async (emailIds: string[], labelName: string, enemyType: EnemyType) => {
@@ -165,6 +272,16 @@ const AppContent: React.FC = () => {
 
   return (
     <div className="app-layout" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* ── Sign-In Landing Page for new / unauthenticated users ── */}
+      {showSignIn ? (
+        <SignInPage
+          isLoading={signInLoading}
+          oauthError={oauthError}
+          onLoginClick={handleLoginClick}
+          onDemoClick={handleDemoClick}
+        />
+      ) : (
+        <>
       {/* Top Navbar */}
       <Navbar
         isAuthenticated={auth.isAuthenticated}
@@ -172,6 +289,9 @@ const AppContent: React.FC = () => {
         email={auth.email}
         calmMode={gameState.calmMode}
         undoCount={undoLogs.length}
+        isRealtimeActive={isRealtimeActive}
+        isSyncing={isSyncing}
+        onTriggerSync={handleTriggerSync}
         onLoginClick={handleLoginClick}
         onDemoClick={handleDemoClick}
         onLogoutClick={handleLogoutClick}
@@ -281,6 +401,8 @@ const AppContent: React.FC = () => {
           Backend Protection Engine strictly enforces zero email deletion and HTTP 403 on protected records.
         </p>
       </footer>
+        </>
+      )}
     </div>
   );
 };
