@@ -1,0 +1,6 @@
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://inbox-quest-ai-6yhm-omega.vercel.app/api/:path*" },
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
