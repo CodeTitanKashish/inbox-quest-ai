@@ -19,6 +19,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Trust reverse proxy (Vercel / Cloud Run) for accurate HTTPS detection & secure cookies
+app.set('trust proxy', 1);
+
 // Enable strong ETags for efficient client caching & revalidation
 app.set('etag', 'strong');
 

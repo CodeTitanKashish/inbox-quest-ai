@@ -1,5 +1,6 @@
 import { GameState, QuestMission } from '../../../../shared/types';
 import { calculateLevel } from '../../../../shared/constants';
+import { Redis } from '@upstash/redis';
 
 export interface UserSessionData {
   sessionId: string;
@@ -82,8 +83,61 @@ export function createInitialGameState(): GameState {
   };
 }
 
+// Initialize Upstash Redis client if credentials exist in environment
+let redis: Redis | null = null;
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+if (redisUrl && redisToken) {
+  try {
+    redis = new Redis({
+      url: redisUrl,
+      token: redisToken
+    });
+    console.log('📡 Upstash Redis initialized for distributed session storage.');
+  } catch (err) {
+    console.warn('⚠️ Failed to initialize Upstash Redis, falling back to in-memory store:', err);
+  }
+}
+
+const REDIS_KEY_PREFIX = 'inboxquest:sess:';
+const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
+
 export class UserStore {
+  // Local in-memory cache / fallback
   private static sessions: Map<string, UserSessionData> = new Map();
+
+  /**
+   * Load session from Upstash Redis into in-memory cache (used in middleware).
+   */
+  public static async loadSessionAsync(sessionId: string, isDemo = false): Promise<UserSessionData> {
+    if (redis) {
+      try {
+        const remoteData = await redis.get<UserSessionData>(`${REDIS_KEY_PREFIX}${sessionId}`);
+        if (remoteData) {
+          this.sessions.set(sessionId, remoteData);
+          return remoteData;
+        }
+      } catch (err) {
+        console.warn(`Upstash read error for session ${sessionId}:`, err);
+      }
+    }
+    return this.getOrCreateSession(sessionId, isDemo);
+  }
+
+  /**
+   * Persists session to Upstash Redis if enabled, and updates local cache.
+   */
+  public static async persistSessionAsync(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session || !redis) return;
+
+    try {
+      await redis.set(`${REDIS_KEY_PREFIX}${sessionId}`, session, { ex: SESSION_TTL_SECONDS });
+    } catch (err) {
+      console.warn(`Upstash write error for session ${sessionId}:`, err);
+    }
+  }
 
   public static getOrCreateSession(sessionId: string, isDemo = false): UserSessionData {
     if (!this.sessions.has(sessionId)) {
@@ -96,16 +150,19 @@ export class UserStore {
     return this.sessions.get(sessionId)!;
   }
 
-  public static updateTokens(sessionId: string, email: string, tokens: any): void {
+  public static async updateTokens(sessionId: string, email: string, tokens: any): Promise<void> {
     const session = this.getOrCreateSession(sessionId, false);
     session.email = email;
     session.tokens = tokens;
     session.isDemo = false;
+    await this.persistSessionAsync(sessionId);
   }
 
   public static updateGameState(sessionId: string, updater: (state: GameState) => void): GameState {
     const session = this.getOrCreateSession(sessionId);
     updater(session.gameState);
+    // Non-blocking async sync to Redis
+    void this.persistSessionAsync(sessionId);
     return session.gameState;
   }
 
@@ -124,6 +181,9 @@ export class UserStore {
       session.gameState.hero.attackPower = 25 + (level - 1) * 5;
     }
 
+    // Non-blocking async sync to Redis
+    void this.persistSessionAsync(sessionId);
+
     return {
       levelUp: level > oldLevel,
       newLevel: level,
@@ -131,7 +191,14 @@ export class UserStore {
     };
   }
 
-  public static clearSession(sessionId: string): void {
+  public static async clearSession(sessionId: string): Promise<void> {
     this.sessions.delete(sessionId);
+    if (redis) {
+      try {
+        await redis.del(`${REDIS_KEY_PREFIX}${sessionId}`);
+      } catch (err) {
+        console.warn(`Upstash delete error for session ${sessionId}:`, err);
+      }
+    }
   }
 }

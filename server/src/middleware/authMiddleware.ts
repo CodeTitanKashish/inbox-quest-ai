@@ -14,7 +14,7 @@ declare global {
   }
 }
 
-// Single singleton demo provider per app (or per session)
+// Single singleton demo provider per session
 const demoProviders = new Map<string, DemoProvider>();
 
 export function getOrCreateDemoProvider(sessionId: string): DemoProvider {
@@ -24,7 +24,7 @@ export function getOrCreateDemoProvider(sessionId: string): DemoProvider {
   return demoProviders.get(sessionId)!;
 }
 
-export function sessionMiddleware(req: Request, res: Response, next: NextFunction): void {
+export async function sessionMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
   let sessionId = req.cookies?.inbox_quest_session;
 
   if (!sessionId) {
@@ -32,13 +32,15 @@ export function sessionMiddleware(req: Request, res: Response, next: NextFunctio
     res.cookie('inbox_quest_session', sessionId, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      sameSite: 'lax',
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
     });
   }
 
   const isDemo = req.cookies?.inbox_quest_demo === 'true' || !req.cookies?.inbox_quest_authenticated;
-  const session = UserStore.getOrCreateSession(sessionId, isDemo);
+  // Load session from Upstash Redis if configured, or in-memory fallback
+  const session = await UserStore.loadSessionAsync(sessionId, isDemo);
 
   req.userSession = session;
 
@@ -52,7 +54,7 @@ export function sessionMiddleware(req: Request, res: Response, next: NextFunctio
     oauth2Client.setCredentials(session.tokens);
     oauth2Client.on('tokens', (newTokens) => {
       session.tokens = { ...session.tokens, ...newTokens };
-      UserStore.updateTokens(sessionId, session.email || '', session.tokens);
+      void UserStore.updateTokens(sessionId, session.email || '', session.tokens);
     });
     req.emailProvider = new GmailProvider(oauth2Client);
   } else {

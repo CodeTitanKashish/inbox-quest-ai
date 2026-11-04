@@ -5,16 +5,27 @@ import { getOrCreateDemoProvider } from '../middleware/authMiddleware';
 
 export const authRouter = Router();
 
+// Requested minimal scope: gmail.modify only
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify'
 ];
 
 function getOAuth2Client() {
-  return new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI || 'http://localhost:8080/api/auth/google/callback'
-  );
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI;
+
+  if (!clientId || !clientSecret || !redirectUri) {
+    throw new Error('Google OAuth credentials not fully configured in environment variables.');
+  }
+
+  return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
+}
+
+function getClientRedirectUrl(): string {
+  // Normalize client target URL for browser redirect after OAuth
+  const clientUrl = process.env.CLIENT_URL || 'https://inbox-quest-ai-six.vercel.app';
+  return clientUrl.replace(/\/+$/, '');
 }
 
 // Check current authentication & mode status
@@ -29,27 +40,33 @@ authRouter.get('/status', (req: Request, res: Response) => {
 
 // Generate Google OAuth URL (gmail.modify only)
 authRouter.get('/google/url', (_req: Request, res: Response) => {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
     return res.status(503).json({
-      error: 'Google OAuth is not configured on this server. Please use Demo Mode or set GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET.'
+      error: 'Google OAuth is not configured on this server. Please use Demo Mode or set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI in Vercel environment variables.'
     });
   }
 
-  const oauth2Client = getOAuth2Client();
-  const authUrl = oauth2Client.generateAuthUrl({
-    access_type: 'offline',
-    scope: SCOPES,
-    prompt: 'consent'
-  });
+  try {
+    const oauth2Client = getOAuth2Client();
+    const authUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: SCOPES,
+      prompt: 'consent'
+    });
 
-  res.json({ url: authUrl });
+    res.json({ url: authUrl });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to generate OAuth URL.' });
+  }
 });
 
-// OAuth Callback handler
+// OAuth Callback handler (Google redirects user back here)
 authRouter.get('/google/callback', async (req: Request, res: Response) => {
+  const clientUrl = getClientRedirectUrl();
   const code = req.query.code as string;
+
   if (!code) {
-    return res.redirect('/?error=oauth_missing_code');
+    return res.redirect(`${clientUrl}/?error=oauth_missing_code`);
   }
 
   try {
@@ -62,26 +79,42 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
     const profile = await gmail.users.getProfile({ userId: 'me' });
     const userEmail = profile.data.emailAddress || 'user@gmail.com';
 
-    // Store tokens strictly server-side
-    UserStore.updateTokens(req.userSession.sessionId, userEmail, tokens);
+    // Store tokens server-side (persists to Upstash Redis if configured)
+    await UserStore.updateTokens(req.userSession.sessionId, userEmail, tokens);
 
+    const isProd = process.env.NODE_ENV === 'production';
+
+    // Set production-ready authentication status cookies
     res.cookie('inbox_quest_authenticated', 'true', {
-      httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      httpOnly: false, // Accessible by client app to check logged-in UI state
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
+
     res.cookie('inbox_quest_demo', 'false', {
       httpOnly: false,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    const clientUrl = process.env.CLIENT_URL || '/';
+    // Make sure session cookie is refreshed with same standard settings
+    res.cookie('inbox_quest_session', req.userSession.sessionId, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    // Always redirect back to the client application URL
     res.redirect(clientUrl);
   } catch (error: any) {
     console.error('OAuth Callback Error:', error);
-    res.redirect(`/?error=${encodeURIComponent(error.message || 'oauth_failed')}`);
+    res.redirect(`${clientUrl}/?error=${encodeURIComponent(error.message || 'oauth_failed')}`);
   }
 });
 
@@ -90,12 +123,17 @@ authRouter.post('/demo', (req: Request, res: Response) => {
   req.userSession.isDemo = true;
   getOrCreateDemoProvider(req.userSession.sessionId).reset();
 
+  const isProd = process.env.NODE_ENV === 'production';
+
   res.cookie('inbox_quest_demo', 'true', {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60 * 1000
   });
-  res.clearCookie('inbox_quest_authenticated');
+
+  res.clearCookie('inbox_quest_authenticated', { path: '/' });
 
   res.json({
     success: true,
@@ -105,13 +143,19 @@ authRouter.post('/demo', (req: Request, res: Response) => {
 });
 
 // Logout / Reset
-authRouter.post('/logout', (req: Request, res: Response) => {
-  UserStore.clearSession(req.userSession.sessionId);
-  res.clearCookie('inbox_quest_authenticated');
+authRouter.post('/logout', async (req: Request, res: Response) => {
+  await UserStore.clearSession(req.userSession.sessionId);
+
+  const isProd = process.env.NODE_ENV === 'production';
+
+  res.clearCookie('inbox_quest_authenticated', { path: '/' });
   res.cookie('inbox_quest_demo', 'true', {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    secure: isProd,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 7 * 24 * 60 * 60 * 1000
   });
+
   res.json({ success: true });
 });
